@@ -1,0 +1,184 @@
+---
+title: "Most Fatal and Most Costly Weather Phenomena in the US from 1950-2008"
+author: "Charin Polpanumas"
+date: "February 3, 2559 BE"
+output:
+  html_document:
+    toc: true
+    theme: readable
+---
+
+### Synopsis
+This report answers the questions of which types of weather phenomena are most harmful to population health and which have the largest economic impact. It utilizes the [NOAA Storm Database](https://www.ncdc.noaa.gov/stormevents/) to visualize such events. During the period from January 1950 to November 2008, tornadoes by far have caused the most injuries and deaths; flood has caused the highest amount of property damages and economic consequences overall while drought has caused the higest amount of crop damages.
+
+### Data Processing
+#### Preprocessing
+Download [Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) from the [NOAA Storm Database](https://www.ncdc.noaa.gov/stormevents/) and read it into *storm* data.frame
+```{r,results='hide', cache=TRUE}
+if(!file.exists('StormData.csv.bz2'))
+download.file(url='https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2',
+              destfile = 'StormData.csv.bz2')
+storm<-read.csv(bzfile("StormData.csv.bz2"))
+```
+Examine data summary and parts of the data set. 
+```{r}
+str(storm)
+```
+Subset the data for only what we need: types of events, fatalities, injuires, property damages and their magnitudes, and crop damages and their magnitudes.
+```{r, results='hide'}
+storm<- subset(storm, select=c('EVTYPE','FATALITIES','INJURIES','PROPDMG','PROPDMGEXP','CROPDMG','CROPDMGEXP'))
+```
+#### Data Transformation
+Notice that PROPDMGEXP and CROPDMGEXP serve as magnitude variables. Therefore, we must transform these variables to get the proper property and crop damages in USD.
+
+
+##### Transform PROPDMG and PROPDMGEXP to PROP
+Examine the unique levels of magnitudes.
+```{r}
+unique(storm$PROPDMGEXP)
+```
+Create PROPEXP for numerical representation of PROPDMGEXP
+```{r,results='hide'}
+storm$PROPEXP[storm$PROPDMGEXP == "K"] <- 1000
+storm$PROPEXP[storm$PROPDMGEXP == "M"] <- 1e+06
+storm$PROPEXP[storm$PROPDMGEXP == ""] <- 1
+storm$PROPEXP[storm$PROPDMGEXP == "B"] <- 1e+09
+storm$PROPEXP[storm$PROPDMGEXP == "m"] <- 1e+06
+storm$PROPEXP[storm$PROPDMGEXP == "0"] <- 1
+storm$PROPEXP[storm$PROPDMGEXP == "5"] <- 1e+05
+storm$PROPEXP[storm$PROPDMGEXP == "6"] <- 1e+06
+storm$PROPEXP[storm$PROPDMGEXP == "4"] <- 10000
+storm$PROPEXP[storm$PROPDMGEXP == "2"] <- 100
+storm$PROPEXP[storm$PROPDMGEXP == "3"] <- 1000
+storm$PROPEXP[storm$PROPDMGEXP == "h"] <- 100
+storm$PROPEXP[storm$PROPDMGEXP == "7"] <- 1e+07
+storm$PROPEXP[storm$PROPDMGEXP == "H"] <- 100
+storm$PROPEXP[storm$PROPDMGEXP == "1"] <- 10
+storm$PROPEXP[storm$PROPDMGEXP == "8"] <- 1e+08
+# Invalid entries
+storm$PROPEXP[storm$PROPDMGEXP == "+"] <- 0
+storm$PROPEXP[storm$PROPDMGEXP == "-"] <- 0
+storm$PROPEXP[storm$PROPDMGEXP == "?"] <- 0
+```
+Create PROP variable by multiplying property damages with their magnitudes
+```{r,results='hide'}
+storm$PROP<- storm$PROPDMG*storm$PROPEXP
+```
+##### Transform CROPDMG and CROPDMGEXP to CROP
+Examine the unique levels of magnitudes.
+```{r}
+unique(storm$CROPDMGEXP)
+```
+Create CROPEXP for numerical representation of CROPDMGEXP
+```{r, results='hide'}
+storm$CROPEXP[storm$CROPDMGEXP == "M"] <- 1e+06
+storm$CROPEXP[storm$CROPDMGEXP == "K"] <- 1000
+storm$CROPEXP[storm$CROPDMGEXP == "m"] <- 1e+06
+storm$CROPEXP[storm$CROPDMGEXP == "B"] <- 1e+09
+storm$CROPEXP[storm$CROPDMGEXP == "0"] <- 1
+storm$CROPEXP[storm$CROPDMGEXP == "k"] <- 1000
+storm$CROPEXP[storm$CROPDMGEXP == "2"] <- 100
+storm$CROPEXP[storm$CROPDMGEXP == ""] <- 1
+# Invalid Entries
+storm$CROPEXP[storm$CROPDMGEXP == "?"] <- 0
+```
+Create CROP variable by multiplying crop damages with their magnitudes
+```{r, results='hide'}
+storm$CROP<- storm$CROPDMG*storm$CROPEXP
+```
+#### Aggregate Data by Event Types
+```{r, results='hide'}
+fatalities<-aggregate(FATALITIES~EVTYPE,data=storm,FUN=sum)
+injuries<-aggregate(INJURIES~EVTYPE,data=storm,FUN=sum)
+prop<-aggregate(PROP~EVTYPE,data=storm,FUN=sum)
+crop<-aggregate(CROP~EVTYPE,data=storm,FUN=sum)
+
+#Change unit to billion USD
+prop$PROP<-prop$PROP/1e+09
+crop$CROP<-crop$CROP/1e+09
+#overall economic damages
+overall<-merge(prop,crop,by.x='EVTYPE',by.y='EVTYPE')
+overall$OVERALL <- overall$PROP+overall$CROP
+```
+### Results
+#### Events with Most Fatalities and Injuries
+Get top 10 events with fatalities and injuries
+```{r, results='hide'}
+fa10<-fatalities[order(-fatalities$FATALITIES), ][1:10, ]
+in10<-injuries[order(-injuries$INJURIES), ][1:10, ]
+```
+Plot fatalities and injuries according to event types. Tornadoes top both categories.
+```{r}
+require(ggplot2)
+require(gridExtra)
+
+#For fatalities
+g1<-ggplot(fa10, aes(x=reorder(EVTYPE,-FATALITIES),y=FATALITIES,fill=EVTYPE))
+g1<-g1+geom_bar(stat='identity')
+g1<-g1+scale_y_continuous(limits=c(0,6000),breaks=seq(0, 6000, 500))
+g1<-g1+labs(x='Event Types',y='Fatalities',title='10 Most Deadly Storm Events')
+g1<-g1+theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='none')
+
+#For injuries
+g2<-ggplot(in10, aes(x=reorder(EVTYPE,-INJURIES),y=INJURIES,fill=EVTYPE))
+g2<-g2+geom_bar(stat='identity')
+g2<-g2+scale_y_continuous(limits=c(0,95000),breaks=seq(0, 95000, 10000))
+g2<-g2+labs(x='Event Types',y='Injuries',title='10 Most Injuring Storm Events')
+g2<-g2+theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='none')
+
+#Plot fatalities and injuries
+grid.arrange(g1,g2,ncol=2)
+```
+
+#### Events with Most Property and Crop Damages
+Get top 10 events with property,crop and overall damages.
+```{r,results='hide'}
+pr10<-prop[order(-prop$PROP), ][1:10, ]
+cr10<-crop[order(-crop$CROP), ][1:10, ]
+ov10<-overall[order(-overall$OVERALL), ][1:10, ]
+```
+Plot property, crop, and overall damages according to event types. Flood tops property and overall damages whereas drought tops crop damages.
+```{r}
+require(ggplot2)
+require(gridExtra)
+
+#For property damages
+g3<-ggplot(pr10, aes(x=reorder(EVTYPE,-PROP),y=PROP,fill=EVTYPE))
+g3<-g3+geom_bar(stat='identity')
+g3<-g3+scale_y_continuous(limits=c(0,150),breaks=seq(0, 150, 50))
+g3<-g3+labs(x='Event Types',y='Damages (billion USD)',title='10 Worst Property Damagers')
+g3<-g3+theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='none')
+
+#For crop damages
+g4<-ggplot(cr10, aes(x=reorder(EVTYPE,-CROP),y=CROP,fill=EVTYPE))
+g4<-g4+geom_bar(stat='identity')
+g4<-g4+scale_y_continuous(limits=c(0,15),breaks=seq(0, 15, 5))
+g4<-g4+labs(x='Event Types',y='Damages (billion USD)',title='10 Worst Crop Damagers')
+g4<-g4+theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position='none')
+
+#For overall damages in stacked barplot
+require(reshape2)
+#Reshape ov10
+mov10<-melt(ov10)
+mov10<-mov10[mov10$variable!='OVERALL',]
+#Sort EVTYPE according to overall damage
+l <-ov10$EVTYPE
+mov10$EVTYPE<-factor(mov10$EVTYPE,levels=l)
+
+g5<-ggplot(mov10, aes(x=EVTYPE,y=value,fill=variable))
+g5<-g5+geom_bar(stat='identity')
+g5<-g5+scale_y_continuous(limits=c(0,160),breaks=seq(0, 160, 50))
+g5<-g5+labs(x='Event Types',y='Damages (billion USD)',title='10 Most Costly Storm Events')
+g5<-g5+theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.title=element_blank())
+
+#Plot prop vs crop and overall
+grid.arrange(g3,g4,ncol=2)
+g5
+```
+
+### Conclusion
+* Tornadoes are most deadly.
+* Flood is real estate's and the economy's worst enemy.
+* Drought is the worst crop killer.
+
+
